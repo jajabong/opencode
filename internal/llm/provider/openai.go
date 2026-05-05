@@ -322,9 +322,12 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 			err := openaiStream.Err()
 			if err == nil || errors.Is(err, io.EOF) {
 				// Stream completed successfully
-				finishReason := o.finishReason(string(acc.ChatCompletion.Choices[0].FinishReason))
-				if len(acc.ChatCompletion.Choices[0].Message.ToolCalls) > 0 {
-					toolCalls = append(toolCalls, o.toolCalls(acc.ChatCompletion)...)
+				var finishReason message.FinishReason = message.FinishReasonEndTurn
+				if len(acc.ChatCompletion.Choices) > 0 {
+					finishReason = o.finishReason(string(acc.ChatCompletion.Choices[0].FinishReason))
+					if len(acc.ChatCompletion.Choices[0].Message.ToolCalls) > 0 {
+						toolCalls = append(toolCalls, o.toolCalls(acc.ChatCompletion)...)
+					}
 				}
 				if len(toolCalls) > 0 {
 					finishReason = message.FinishReasonToolUse
