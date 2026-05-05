@@ -264,6 +264,7 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 			acc := openai.ChatCompletionAccumulator{}
 			currentContent := ""
 			toolCalls := make([]message.ToolCall, 0)
+			pendingToolCalls := make(map[string]*message.ToolCall)
 
 			for openaiStream.Next() {
 				chunk := openaiStream.Current()
@@ -277,7 +278,45 @@ func (o *openaiClient) stream(ctx context.Context, messages []message.Message, t
 						}
 						currentContent += choice.Delta.Content
 					}
+
+					// FIX: Emit EventToolUseStart/Stop for streaming tool_calls
+					if choice.Delta.ToolCalls != nil {
+						for _, tc := range choice.Delta.ToolCalls {
+							id := tc.ID
+							name := tc.Function.Name
+							args := tc.Function.Arguments
+
+							if existing, ok := pendingToolCalls[id]; ok {
+								// Append to existing tool call input
+								existing.Input += args
+							} else {
+								// New tool call - emit EventToolUseStart
+								toolCall := &message.ToolCall{
+									ID:       id,
+									Name:     name,
+									Input:    args,
+									Type:     "function",
+									Finished: false,
+								}
+								pendingToolCalls[id] = toolCall
+								eventChan <- ProviderEvent{
+									Type:     EventToolUseStart,
+									ToolCall: toolCall,
+								}
+							}
+						}
+					}
 				}
+			}
+
+			// Stream ended - emit EventToolUseStop for all pending tool calls
+			for id, tc := range pendingToolCalls {
+				tc.Finished = true
+				eventChan <- ProviderEvent{
+					Type:     EventToolUseStop,
+					ToolCall: &message.ToolCall{ID: id},
+				}
+				toolCalls = append(toolCalls, *tc)
 			}
 
 			err := openaiStream.Err()
